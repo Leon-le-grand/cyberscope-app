@@ -1,0 +1,48 @@
+{
+  "WordPress": {
+    "metaTags": [
+      { "selector": "meta[name='generator']", "value": "WordPress" }
+    ],
+    "urlPatterns": ["/wp-content/", "/wp-login.php", "/wp-admin/"],
+    "headers": [
+      { "name": "x-powered-by", "value": "WordPress" }
+    ],
+    "cookies": ["wordpress_logged_in_", "wp-settings-"]
+  },
+  "Joomla": {
+    "metaTags": [
+      { "selector": "meta[name='generator']", "value": "Joomla" }
+    ],
+    "urlPatterns": ["/administrator/", "/component/"],
+    "headers": [],
+    "cookies": ["joomla_user_state"]
+  },
+  "Drupal": {
+    "metaTags": [
+      { "selector": "meta[name='generator']", "value": "Drupal" }
+    ],
+    "urlPatterns": ["/sites/all/", "/core/"],
+    "headers": [
+      { "name": "x-drupal-cache", "value": "" }
+    ],
+    "cookies": []
+  },
+  "Shopify": {
+    "metaTags": [],
+    "urlPatterns": ["/cdn.shopify.com/", "/shopify.js"],
+    "headers": [
+      { "name": "x-shopify-stage", "value": "" }
+    ],
+    "cookies": ["_shopify_s", "_shopify_y"]
+  },
+  "Wix": {
+    "metaTags": [
+      { "selector": "meta[name='generator']", "value": "Wix.com" }
+    ],
+    "urlPatterns": ["/wix/", "/statics.wixstatic.com/"],
+    "headers": [
+      { "name": "x-wix-request-id", "value": "" }
+    ],
+    "cookies": ["wixSession2"]
+  }
+}
