@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+// components/NotificationSystem.tsx
+"use client"; // <--- THIS LINE IS CRUCIAL
+
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { CheckCircle, AlertTriangle, XCircle, Info, X } from 'lucide-react';
 
 interface Notification {
