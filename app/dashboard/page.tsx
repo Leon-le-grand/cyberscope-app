@@ -1,38 +1,91 @@
 // app/dashboard/page.tsx
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Shield, Search, FileText, Settings, Home, Sun, Moon, Menu, X,
   User, Download, Calendar, MapPin, Activity, Clock, AlertTriangle,
   CheckCircle, Zap, Globe, Lock, Eye, ChevronDown, Play, Pause,
   Save, Trash2, Filter, BarChart3, TrendingUp, Server, Wrench, Plus,
   Sparkles, Package, Import, List, Cpu, ShieldCheck, Network, Key,
-  ChevronsLeft, ChevronsRight // Icons for sidebar toggle
+  ChevronsLeft, ChevronsRight, Bell, Info, ExternalLink,
+  Code, Terminal, Cloud, Database, Bug, Layers, DollarSign, Gift,
+  CreditCard, UserCheck, Code2 // New icons for features
 } from 'lucide-react';
 import { useNotify } from '@/components/NotificationSystem';
-import { useAuth } from '@/contexts/AuthContext'; // CORRECTED: Reverted to the original import path
+import { useAuth } from '@/contexts/AuthContext';
+import Image from 'next/image'; // For animated logos
+
+// Define User interface to include plan and trialEndDate
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: 'admin' | 'user';
+  avatar: string;
+  lastLogin?: string;
+  scanQuota?: number;
+  plan?: 'free_trial' | 'pro' | 'pro_plus' | 'free'; // Added plan type
+  trialEndDate?: string; // ISO string for trial end date
+}
+
+// Define Addon interface with size and status
+interface Addon {
+  id: string;
+  name: string;
+  description: string;
+  size: string; // e.g., "500 MB", "2 GB"
+  installed: boolean;
+  status?: 'installing' | 'installed' | 'available';
+  version?: string;
+  lastUpdated?: string;
+}
+
+// Define Tool interface with category
+interface Tool {
+  id: string;
+  name: string;
+  icon: React.ElementType; // Lucide icon component
+  description: string;
+  category: 'network' | 'web' | 'password' | 'general';
+  isScanningTool?: boolean; // New property to distinguish scanning tools
+}
+
+// Define Scan interface with status
+interface Scan {
+  id: string;
+  target: string;
+  type: string;
+  timestamp: string;
+  duration: number;
+  status: 'pending' | 'completed' | 'canceled';
+  findings: any[];
+  toolsUsed?: string[]; // New: Tools used for this scan
+  errors?: string[]; // New: Errors during scan
+  logs?: string; // New: Detailed logs
+}
+
 
 export default function DashboardPage() {
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile } = useAuth();
   const notify = useNotify();
 
   // Theme and UI State
   const [darkMode, setDarkMode] = useState(true);
-  // sidebarOpen: true = expanded (w-56) on desktop, false = collapsed (w-20) on desktop
-  // on mobile: true = open (w-56 overlay), false = hidden (w-0)
-  const [sidebarOpen, setSidebarOpen] = useState(true); // Default to expanded on load
-  const [activeSection, setActiveSection] = useState('ai-overview');
+  // sidebarMode: 'expanded' = full width, 'icons-only' = collapsed to icons
+  const [sidebarMode, setSidebarMode] = useState<'expanded' | 'icons-only'>('expanded');
+  const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false); // Controls mobile overlay
+  const [activeSection, setActiveSection] = useState('dashboard'); // Changed default active section to 'dashboard'
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
-  
+  const [notificationDropdownOpen, setNotificationDropdownOpen] = useState(false); // New: Notification dropdown
+
   // State for AI Insight Popup
   const [aiInsightPopupOpen, setAiInsightPopupOpen] = useState(false);
   const [aiInsightContent, setAiInsightContent] = useState('');
 
   // State for Report Creation Modal
   const [reportModalOpen, setReportModalOpen] = useState(false);
-
 
   // Project State
   const [currentProject, setCurrentProject] = useState({
@@ -42,28 +95,50 @@ export default function DashboardPage() {
   });
 
   // Scan State
-  const [scanTarget, setScanTarget] = useState('');
+  const [scanTarget, setScanTarget] = useState(currentProject.target); // Initialize with current project target
   const [scanType, setScanType] = useState('port');
   const [scanResults, setScanResults] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
-  const [scanHistory, setScanHistory] = useState<any[]>([]);
-  
+  const [scanHistory, setScanHistory] = useState<Scan[]>([]); // Typed Scan[]
+
+  // New: Scan History Filters & Search
+  const [scanFilter, setScanFilter] = useState<'all' | 'pending' | 'completed' | 'canceled'>('all');
+  const [scanSearchTerm, setScanSearchTerm] = useState('');
+  const [selectedScanForDetails, setSelectedScanForDetails] = useState<Scan | null>(null);
+
   // Addons State
-  const [addons, setAddons] = useState([
-    { name: 'Wordlists', installed: true, description: 'Common password and directory wordlists' },
-    { name: 'NMAP Scripts', installed: false, description: 'Advanced NMAP scanning scripts' },
-    { name: 'Payloads', installed: false, description: 'Common attack payloads for testing' }
+  const [addons, setAddons] = useState<Addon[]>([
+    { id: 'wordlists', name: 'Wordlists', installed: true, description: 'Common password and directory wordlists', size: '500 MB', status: 'installed', version: '1.0.0', lastUpdated: '2025-07-01' },
+    { id: 'nmap-scripts', name: 'NMAP Scripts', installed: false, description: 'Advanced NMAP scanning scripts', size: '2 GB', status: 'available', version: '1.2.1', lastUpdated: '2025-06-15' },
+    { id: 'payloads', name: 'Payloads', installed: false, description: 'Common attack payloads for testing', size: '1.5 GB', status: 'available', version: '2.0.0', lastUpdated: '2025-07-20' },
+    { id: 'recon-modules', name: 'Recon Modules', installed: true, description: 'Modules for advanced reconnaissance', size: '750 MB', status: 'installed', version: '1.1.0', lastUpdated: '2025-07-25' },
+    { id: 'exploit-db', name: 'Exploit Database', installed: false, description: 'Access to a comprehensive exploit database', size: '5 GB', status: 'available', version: '1.0.0', lastUpdated: '2025-05-10' }
+  ]);
+  const [addonModalOpen, setAddonModalOpen] = useState(false);
+  const [selectedAddon, setSelectedAddon] = useState<Addon | null>(null);
+  const [addonActionType, setAddonActionType] = useState<'install' | 'manage' | null>(null);
+
+  // Tools State (Generic Tools)
+  const [genericTools] = useState<Tool[]>([
+    { id: 'port-scanner', name: 'Port Scanner', icon: Network, description: 'Scan for open ports and services', category: 'network' },
+    { id: 'vulnerability-scanner', name: 'Vulnerability Scanner', icon: ShieldCheck, description: 'Identify security vulnerabilities', category: 'general' },
+    { id: 'ssl-analyzer', name: 'SSL Analyzer', icon: Lock, description: 'Check SSL/TLS configuration', category: 'web' },
+    { id: 'subdomain-finder', name: 'Subdomain Finder', icon: Globe, description: 'Discover subdomains of a target', category: 'web' },
+    { id: 'password-cracker', name: 'Password Cracker', icon: Key, description: 'Test password strength', category: 'password' },
+    { id: 'api-scanner', name: 'API Scanner', icon: Cpu, description: 'Scan API endpoints for issues', category: 'web' }
   ]);
 
-  // Tools State
-  const [tools] = useState([
-    { name: 'Port Scanner', icon: Network, description: 'Scan for open ports and services' },
-    { name: 'Vulnerability Scanner', icon: ShieldCheck, description: 'Identify security vulnerabilities' },
-    { name: 'SSL Analyzer', icon: Lock, description: 'Check SSL/TLS configuration' },
-    { name: 'Subdomain Finder', icon: Globe, description: 'Discover subdomains of a target' },
-    { name: 'Password Cracker', icon: Key, description: 'Test password strength' },
-    { name: 'API Scanner', icon: Cpu, description: 'Scan API endpoints for issues' }
+  // Scanning Tools (for Scanner Tab)
+  const [scanningTools] = useState<Tool[]>([
+    { id: 'nmap', name: 'Nmap', icon: Terminal, description: 'Network discovery and security auditing tool.', category: 'network', isScanningTool: true },
+    { id: 'nikto', name: 'Nikto', icon: Bug, description: 'Web server scanner for vulnerabilities.', category: 'web', isScanningTool: true },
+    { id: 'gobuster', name: 'Gobuster', icon: Code2, description: 'Directory/file & DNS busting tool.', category: 'web', isScanningTool: true },
+    { id: 'sqlmap', name: 'SQLMap', icon: Database, description: 'Automatic SQL injection and database takeover tool.', category: 'web', isScanningTool: true },
   ]);
+
+  // New: Tools Filters & Search (for Tools Tab)
+  const [toolFilter, setToolFilter] = useState<'all' | 'network' | 'web' | 'password' | 'general'>('all');
+  const [toolSearchTerm, setToolSearchTerm] = useState('');
 
   // Report Editor State (now tied to the modal)
   const [reportContent, setReportContent] = useState<string>('');
@@ -74,6 +149,29 @@ export default function DashboardPage() {
     target: currentProject.target,
   });
 
+  // New: Notifications State
+  const [notifications, setNotifications] = useState<string[]>([
+    "Welcome to CyberScope Pro! Your 7-day free trial has started.",
+    "New NMAP Scripts addon available!",
+    "Your scan for example.com completed successfully.",
+  ]);
+
+  // Trial End Date Calculation
+  const trialEndDate = user?.trialEndDate ? new Date(user.trialEndDate) : null;
+  const now = new Date();
+  const timeLeftMs = trialEndDate ? trialEndDate.getTime() - now.getTime() : 0;
+  const daysLeft = Math.max(0, Math.ceil(timeLeftMs / (1000 * 60 * 60 * 24)));
+  const isTrialActive = user?.plan === 'free_trial' && daysLeft > 0;
+
+  // State for Tool Options Modal
+  const [toolOptionsModalOpen, setToolOptionsModalOpen] = useState(false);
+  const [selectedToolForOptions, setSelectedToolForOptions] = useState<Tool | null>(null);
+  const [nmapOptions, setNmapOptions] = useState({ osDetection: false, noPing: false, aggressive: false });
+  const [niktoOptions, setNiktoOptions] = useState({ fullScan: false, sslSupport: false });
+  const [gobusterOptions, setGobusterOptions] = useState({ wordlist: 'common', extensions: '', threads: 10 });
+  const [sqlmapOptions, setSqlmapOptions] = useState({ level: 1, risk: 1, tamper: false });
+
+
   // Effect to update report metadata when user or project changes (e.g., on first load)
   useEffect(() => {
     setReportMetadata(prev => ({
@@ -81,10 +179,25 @@ export default function DashboardPage() {
       reportedBy: user?.name || 'CyberScope User',
       target: currentProject.target,
     }));
+    // Keep scanTarget in sync with current project target
+    setScanTarget(currentProject.target);
   }, [user, currentProject]);
 
+  // Handle initial active section on component mount
+  useEffect(() => {
+    setActiveSection('dashboard'); // Ensure dashboard is active on refresh
+  }, []);
+
+  // Set initial trial end date on user load if not already set (for new users)
+  useEffect(() => {
+    if (user && !user.trialEndDate && user.plan === 'free_trial') {
+      const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+      updateProfile({ trialEndDate: sevenDaysFromNow });
+    }
+  }, [user, updateProfile, now]);
+
   // Helper to generate a dummy report content for AI Overview button
-  const generateDummyReportContent = () => {
+  const generateDummyReportContent = useCallback(() => {
     const findings = scanResults?.findings || [
       { type: 'XSS', severity: 'high', description: 'Reflected XSS vulnerability found in search input. Malicious script can be injected, leading to session hijacking or defacement.' },
       { type: 'SQL Injection', severity: 'critical', description: 'Potential SQL injection in login form. Attacker can bypass authentication or extract data from database.' },
@@ -100,14 +213,14 @@ export default function DashboardPage() {
         content += `Severity: ${finding.severity.toUpperCase()}\n`;
         content += `Description: ${finding.description}\n`;
         if (finding.severity === 'critical') {
-            content += `Impact: Critical vulnerabilities can lead to full system compromise or significant data loss.\n`;
-            content += `Recommendation: Immediate action required. Prioritize patching or implementing compensating controls.\n`;
+          content += `Impact: Critical vulnerabilities can lead to full system compromise or significant data loss.\n`;
+          content += `Recommendation: Immediate action required. Prioritize patching or implementing compensating controls.\n`;
         } else if (finding.severity === 'high') {
-            content += `Impact: High-severity issues can allow unauthorized access or privilege escalation.\n`;
-            content += `Recommendation: High priority. Address as soon as possible.\n`;
+          content += `Impact: High-severity issues can allow unauthorized access or privilege escalation.\n`;
+          content += `Recommendation: High priority. Address as soon as possible.\n`;
         } else {
-            content += `Impact: Potential information disclosure or minor disruption.\n`;
-            content += `Recommendation: Medium/Low priority. Review and mitigate as appropriate.\n`;
+          content += `Impact: Potential information disclosure or minor disruption.\n`;
+          content += `Recommendation: Medium/Low priority. Review and mitigate as appropriate.\n`;
         }
         content += `\n`;
       });
@@ -117,13 +230,12 @@ export default function DashboardPage() {
     }
 
     return content;
-  };
+  }, [scanResults, currentProject.target]);
 
 
   // Report Editor Actions
   const handleCreateNewReport = () => {
     setReportContent('');
-    // Generate a simple unique ID for demonstration
     const newReportId = `REP-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     setReportMetadata({
       reportId: newReportId,
@@ -131,15 +243,14 @@ export default function DashboardPage() {
       reportedBy: user?.name || 'CyberScope User',
       target: currentProject.target,
     });
-    setReportModalOpen(true); // Open the modal
+    setReportModalOpen(true);
     notify.info('New Report', 'Creating a new security report.');
   };
 
   const handleSaveReport = () => {
-    // In a real app, you'd send `reportContent` and `reportMetadata` to a backend API to save it.
     console.log('Saving report:', { content: reportContent, metadata: reportMetadata });
     notify.success('Report Saved', 'Your document has been saved locally (mock).');
-    setReportModalOpen(false); // Close modal on save
+    setReportModalOpen(false);
   };
 
   const handleDownloadPdf = () => {
@@ -183,7 +294,6 @@ export default function DashboardPage() {
     }
   };
 
-
   // Toggle theme
   const toggleTheme = () => {
     setDarkMode(!darkMode);
@@ -198,7 +308,7 @@ export default function DashboardPage() {
       setIsLoadingContent(false); // End loading animation
       // On small screens, close sidebar after selection
       if (typeof window !== 'undefined' && window.innerWidth < 1024) {
-        setSidebarOpen(false);
+        setSidebarOpenMobile(false);
       }
     }, 300); // Simulate 300ms loading time
   };
@@ -216,12 +326,16 @@ export default function DashboardPage() {
 
     // Simulate API call
     setTimeout(() => {
-      const mockResults = {
+      const statusOptions: Scan['status'][] = ['completed', 'pending', 'canceled'];
+      const randomStatus = statusOptions[Math.floor(Math.random() * statusOptions.length)];
+
+      const mockResults: Scan = {
+        id: `scan-${Date.now()}`,
         target: scanTarget,
         type: scanType,
         timestamp: new Date().toISOString(),
         duration: Math.floor(Math.random() * 30) + 10,
-        status: 'completed',
+        status: randomStatus, // Random status for testing filters
         findings: scanType === 'port' ? [
           { port: '22', service: 'SSH', state: 'open', risk: 'low', description: 'SSH Port 22 Open' },
           { port: '80', service: 'HTTP', state: 'open', risk: 'medium', description: 'HTTP Port 80 Open' },
@@ -231,7 +345,12 @@ export default function DashboardPage() {
           { type: 'XSS', severity: 'high', description: 'Reflected XSS vulnerability found in search input.' },
           { type: 'SQL Injection', severity: 'critical', description: 'Potential SQL injection in login form.' },
           { type: 'Outdated Software', severity: 'medium', description: 'Apache version 2.4.29 has known vulnerabilities.' }
-        ]
+        ],
+        toolsUsed: ['Nmap', 'Nikto'], // Mock tools used
+        errors: randomStatus === 'canceled' ? ['Scan interrupted by user.', 'Target unresponsive.'] : [],
+        logs: randomStatus === 'pending' ? 'Scan is currently running. Awaiting results...' :
+              randomStatus === 'canceled' ? 'Scan was cancelled. Some partial results may be available.' :
+              'Scan completed successfully. All checks performed.'
       };
 
       setScanResults(mockResults);
@@ -243,15 +362,89 @@ export default function DashboardPage() {
 
   // Function to open AI Insight popup
   const handleViewAiInsight = () => {
-    setAiInsightContent(generateDummyReportContent()); // Populate with generated content
+    setAiInsightContent(generateDummyReportContent());
     setAiInsightPopupOpen(true);
   };
+
+  // Filtered Scan History
+  const filteredScanHistory = scanHistory.filter(scan => {
+    const matchesFilter = scanFilter === 'all' || scan.status === scanFilter;
+    const matchesSearch = scan.target.toLowerCase().includes(scanSearchTerm.toLowerCase()) ||
+                          scan.type.toLowerCase().includes(scanSearchTerm.toLowerCase()) ||
+                          scan.status.toLowerCase().includes(scanSearchTerm.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
+  // Filtered Tools (for Tools Tab)
+  const filteredGenericTools = genericTools.filter(tool => {
+    const matchesFilter = toolFilter === 'all' || tool.category === toolFilter;
+    const matchesSearch = tool.name.toLowerCase().includes(toolSearchTerm.toLowerCase()) ||
+                          tool.description.toLowerCase().includes(toolSearchTerm.toLowerCase()) ||
+                          tool.category.toLowerCase().includes(toolSearchTerm.toLowerCase());
+    return matchesFilter && matchesSearch;
+  });
+
+  // Addon Modal Handlers
+  const handleAddonAction = (addon: Addon, type: 'install' | 'manage') => {
+    setSelectedAddon(addon);
+    setAddonActionType(type);
+    setAddonModalOpen(true);
+  };
+
+  const handleInstallAddon = (addonId: string) => {
+    setAddons(prev => prev.map(addon =>
+      addon.id === addonId ? { ...addon, installed: true, status: 'installing' } : addon
+    ));
+    notify.info('Installing Addon', `${selectedAddon?.name} is being installed...`);
+    setAddonModalOpen(false);
+    // Simulate installation
+    setTimeout(() => {
+      setAddons(prev => prev.map(addon =>
+        addon.id === addonId ? { ...addon, status: 'installed' } : addon
+      ));
+      notify.success('Installation Complete', `${selectedAddon?.name} installed successfully!`);
+    }, 2000);
+  };
+
+  const handleUpgradePlan = (plan: 'pro' | 'pro_plus') => {
+    notify.info('Upgrade Initiated', `Initiating upgrade to ${plan.toUpperCase()} plan.`);
+    // In a real app, this would redirect to a payment gateway or trigger a Cloud Function
+    console.log(`User ${user?.email} wants to upgrade to ${plan}`);
+    // For demo, simulate success
+    setTimeout(() => {
+      updateProfile({ plan: plan as User['plan'], trialEndDate: undefined }); // Update user's plan in Firestore, clear trial end date
+      notify.success('Upgrade Successful', `You are now on the ${plan.toUpperCase()} plan!`);
+      setActiveSection('settings'); // Stay on settings to see plan change
+    }, 1500);
+  };
+
+  // Handle opening tool options modal
+  const handleOpenToolOptions = (tool: Tool) => {
+    setSelectedToolForOptions(tool);
+    setToolOptionsModalOpen(true);
+  };
+
+  // Handle initiating scan from tool options modal
+  const handleScanWithToolOptions = () => {
+    if (!selectedToolForOptions || !scanTarget) {
+      notify.error('Scan Error', 'Tool or target not selected.');
+      return;
+    }
+    notify.info('Scan Initiated', `Starting ${selectedToolForOptions.name} scan on ${scanTarget} with custom options.`);
+    setToolOptionsModalOpen(false);
+    // Here you would integrate with your backend to run the actual scan
+    // For now, simulate a generic scan result
+    performScan(); // Re-use general scan function for mock results
+  };
+
 
   const themeClasses = darkMode ? 'dark' : '';
   const bgClass = darkMode ? 'bg-slate-900' : 'bg-gray-50';
   const cardClass = darkMode ? 'bg-slate-800/50 border-slate-700' : 'bg-white border-gray-200';
   const textClass = darkMode ? 'text-white' : 'text-gray-900';
   const inputClass = "w-full p-2 rounded-lg bg-slate-700/50 border border-slate-700 focus:outline-none focus:border-green-500";
+  const buttonPrimaryClass = "bg-green-500 hover:bg-green-600 text-white font-medium rounded-lg transition-colors";
+  const buttonSecondaryClass = "bg-slate-700/50 hover:bg-slate-700 text-white font-medium rounded-lg transition-colors";
 
 
   return (
@@ -277,11 +470,19 @@ export default function DashboardPage() {
           <div className="flex items-center space-x-3">
             {/* Mobile-only menu button */}
             <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
+              onClick={() => setSidebarOpenMobile(!sidebarOpenMobile)}
               className="p-2 rounded-lg hover:bg-slate-700/50 lg:hidden"
               aria-label="Toggle sidebar"
             >
-              {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              {sidebarOpenMobile ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
+            {/* Desktop Sidebar Toggle (always visible, affects sidebar width) */}
+            <button
+              onClick={() => setSidebarMode(prev => prev === 'expanded' ? 'icons-only' : 'expanded')}
+              className="p-2 rounded-lg hover:bg-slate-700/50 hidden lg:block"
+              aria-label="Toggle sidebar collapse"
+            >
+              {sidebarMode === 'expanded' ? <ChevronsLeft className="h-5 w-5" /> : <ChevronsRight className="h-5 w-5" />}
             </button>
             <div className="flex items-center space-x-2">
               <Shield className="h-8 w-8 text-green-400" />
@@ -301,8 +502,55 @@ export default function DashboardPage() {
             </button>
           </div>
 
+          {/* Trial Countdown & Upgrade Button */}
+          {isTrialActive && (
+            <div className="hidden md:flex items-center space-x-4 text-sm font-medium text-yellow-400 bg-yellow-500/10 px-3 py-1.5 rounded-lg border border-yellow-500/20">
+              <Gift className="h-4 w-4" />
+              <span>Free Trial: {daysLeft} days left!</span>
+              <button
+                onClick={() => handleSetActiveSection('settings')} // Go to settings to upgrade
+                className="ml-2 px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded-md transition-colors text-xs"
+              >
+                Upgrade Now
+              </button>
+            </div>
+          )}
+
+
           {/* Right Actions */}
           <div className="flex items-center space-x-4">
+            {/* Notification Icon */}
+            <div className="relative">
+              <button
+                onClick={() => setNotificationDropdownOpen(!notificationDropdownOpen)}
+                className="p-2 rounded-lg hover:bg-slate-700/50 transition-colors"
+                aria-label="Notifications"
+              >
+                <Bell className="h-5 w-5" />
+                {notifications.length > 0 && (
+                  <span className="absolute top-1 right-1 block h-2 w-2 rounded-full ring-2 ring-slate-900 bg-red-500" />
+                )}
+              </button>
+              {notificationDropdownOpen && (
+                <div className={`absolute right-0 mt-2 w-64 ${cardClass} border rounded-lg shadow-lg max-h-60 overflow-y-auto ${darkMode ? 'scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800' : 'scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200'}`}>
+                  <div className="p-3 border-b border-slate-700">
+                    <p className="font-medium">Notifications</p>
+                  </div>
+                  <div className="p-1">
+                    {notifications.length > 0 ? (
+                      notifications.map((notif, index) => (
+                        <div key={index} className="p-2 text-sm border-b border-slate-700 last:border-b-0">
+                          {notif}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="p-2 text-sm text-slate-400">No new notifications.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
@@ -331,9 +579,12 @@ export default function DashboardPage() {
                     <p className="text-sm text-slate-400">{user?.email || 'demo@cyberscope.com'}</p>
                   </div>
                   <div className="p-1">
-                    <button className="w-full text-left p-2 hover:bg-slate-700/50 rounded flex items-center space-x-2">
+                    <button
+                      onClick={() => { handleSetActiveSection('settings'); setUserDropdownOpen(false); }}
+                      className="w-full text-left p-2 hover:bg-slate-700/50 rounded flex items-center space-x-2"
+                    >
                       <User className="h-4 w-4" />
-                      <span>Profile</span>
+                      <span>Profile & Settings</span>
                     </button>
                     <button
                       onClick={logout}
@@ -358,22 +609,11 @@ export default function DashboardPage() {
           flex flex-col py-4
           h-[calc(100vh-4rem)] /* Fixed height for sidebar, allows its content to scroll if needed */
           lg:static lg:h-auto lg:shrink-0 lg:border-r
-          ${sidebarOpen ? 'w-56' : 'w-20'} /* Desktop: w-56 expanded, w-20 collapsed */
-          ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} /* Mobile: slides in/out fully */
+          ${sidebarMode === 'expanded' ? 'w-56' : 'w-20'} /* Desktop: w-56 expanded, w-20 collapsed */
+          ${sidebarOpenMobile ? 'translate-x-0' : '-translate-x-full'} /* Mobile: slides in/out fully */
           fixed top-16 left-0 z-40 /* Mobile overlay */
           lg:block /* Always block on large screens to maintain layout */
         `}>
-          {/* Desktop Sidebar Toggle (only visible on large screens) */}
-          <div className={`hidden lg:flex justify-end p-2 mb-4`}>
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 rounded-lg hover:bg-slate-700/50"
-              aria-label="Toggle sidebar collapse"
-            >
-              {sidebarOpen ? <ChevronsLeft className="h-5 w-5" /> : <ChevronsRight className="h-5 w-5" />}
-            </button>
-          </div>
-
           {/* Sidebar Navigation - Apply overflow-y-auto here for internal scrolling */}
           <nav className="px-4 space-y-1 flex-grow overflow-y-auto">
             {[
@@ -392,12 +632,11 @@ export default function DashboardPage() {
                   ${activeSection === id
                     ? 'bg-green-500/20 text-green-400 border border-green-500/30'
                     : 'hover:bg-slate-700/50'}
-                  ${!sidebarOpen && 'justify-center'} /* Center icons when collapsed */
+                  ${sidebarMode === 'icons-only' && 'justify-center'} /* Center icons when collapsed */
                 `}
               >
                 <Icon className="h-5 w-5 flex-shrink-0" />
-                {sidebarOpen && <span>{label}</span>}
-                {/* For collapsed state, a tooltip could be added here */}
+                {sidebarMode === 'expanded' && <span className="whitespace-nowrap">{label}</span>}
               </button>
             ))}
           </nav>
@@ -411,20 +650,19 @@ export default function DashboardPage() {
                   ? 'bg-green-500/20 text-green-400 border border-green-500/30'
                   : 'hover:bg-slate-700/50'
               }
-              ${!sidebarOpen && 'justify-center'} /* Center icon when collapsed */
+              ${sidebarMode === 'icons-only' && 'justify-center'} /* Center icon when collapsed */
               `}
             >
               <Settings className="h-5 w-5 flex-shrink-0" />
-              {sidebarOpen && <span>Settings</span>}
-              {/* For collapsed state, a tooltip could be added here */}
+              {sidebarMode === 'expanded' && <span className="whitespace-nowrap">Settings</span>}
             </button>
           </div>
         </aside>
 
         {/* Main Content Area */}
-        {/* Adjusted left margin for desktop to account for sidebar width */}
         <main className={`flex-1 p-6 overflow-y-auto h-[calc(100vh-4rem)] transition-all duration-300 ease-in-out
-          ${sidebarOpen ? 'lg:ml-56' : 'lg:ml-20'} /* Push content based on sidebar state */
+          ${sidebarMode === 'expanded' ? 'lg:ml-56' : 'lg:ml-20'} /* Push content based on sidebar state */
+          ${darkMode ? 'scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800' : 'scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200'}
           `}>
           {isLoadingContent ? (
             <div className="flex flex-col items-center justify-center h-full min-h-[400px]">
@@ -448,14 +686,14 @@ export default function DashboardPage() {
                       { label: 'Critical Issues', value: '3', icon: AlertTriangle, color: 'red' },
                       { label: 'Resolved', value: '12', icon: CheckCircle, color: 'green' },
                       { label: 'Active Targets', value: '1', icon: Server, color: 'purple' }
-                    ].map(({ label, value, icon: Icon, color: itemColor }) => ( // Renamed 'color' to 'itemColor'
+                    ].map(({ label, value, icon: Icon, color: itemColor }) => (
                       <div key={label} className={`${cardClass} border rounded-xl p-6`}>
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="text-slate-400 text-sm">{label}</p>
                             <p className={`text-2xl font-bold ${textClass}`}>{value}</p>
                           </div>
-                          <Icon className={`h-8 w-8 text-${itemColor}-500`} /> {/* Using itemColor here */}
+                          <Icon className={`h-8 w-8 text-${itemColor}-500`} />
                         </div>
                       </div>
                     ))}
@@ -493,17 +731,16 @@ export default function DashboardPage() {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
                   <div>
                     <h1 className={`text-3xl font-bold ${textClass} mb-2`}>AI Security Overview</h1>
-                    <p className="text-slate-400">Get intelligent insights about your target's security posture</p>
+                    <p className="text-slate-400">Get intelligent insights about your target's security posture.</p>
                   </div>
 
-                  {/* Buttons for AI Overview */}
                   <div className="flex flex-col sm:flex-row gap-4">
                     <button
                       onClick={() => {
                         const reportId = `#AI-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
                         setReportMetadata(prev => ({ ...prev, reportId, target: currentProject.target, reportedBy: user?.name || 'CyberScope User' }));
                         setReportContent(generateDummyReportContent());
-                        setReportModalOpen(true); // Open the report modal directly
+                        setReportModalOpen(true);
                         notify.success('Report Drafted', `AI-powered report draft '${reportId}' created.`);
                       }}
                       className="flex-1 bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg font-medium text-white text-sm transition-colors flex items-center justify-center space-x-2"
@@ -512,7 +749,7 @@ export default function DashboardPage() {
                       <span>Generate AI-Powered Report</span>
                     </button>
                     <button
-                      onClick={handleViewAiInsight} // New button to view insights in popup
+                      onClick={handleViewAiInsight}
                       className="flex-1 bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-lg font-medium text-white text-sm transition-colors flex items-center justify-center space-x-2"
                     >
                       <Eye className="h-4 w-4" />
@@ -520,97 +757,257 @@ export default function DashboardPage() {
                     </button>
                   </div>
 
+                  {/* New: Import Results Button */}
+                  <div className="flex justify-center">
+                    <button
+                      onClick={() => {
+                        if (scanResults) {
+                          setAiInsightContent(generateDummyReportContent()); // Re-generate content with latest scan results
+                          notify.success('Results Imported', 'Latest scan results imported for AI analysis.');
+                        } else {
+                          notify.info('No Results', 'Perform a scan first to import results.');
+                        }
+                      }}
+                      className={`px-6 py-3 ${buttonSecondaryClass} flex items-center space-x-2`}
+                    >
+                      <Import className="h-5 w-5" />
+                      <span>Import Latest Scan Results</span>
+                    </button>
+                  </div>
 
-                  {/* AI Overview content */}
+                  {/* Simplified AI Overview content - removed static insights */}
+                  <div className={`${cardClass} border rounded-xl p-6 text-center`}>
+                    <Sparkles className="h-12 w-12 text-green-400 mx-auto mb-4" />
+                    <h2 className={`text-xl font-semibold ${textClass} mb-2`}>AI Analysis Ready</h2>
+                    <p className="text-slate-400 mb-4">Click "Generate AI-Powered Report" to get a detailed security analysis, or "View AI Insights" for a quick summary.</p>
+                    <p className="text-sm text-slate-500">The AI leverages data from your recent scans to provide actionable recommendations.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Scanner Section */}
+              {activeSection === 'scanner' && (
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+                  <div>
+                    <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Security Scanner</h1>
+                    <p className="text-slate-400">Configure and launch various security scans against your targets.</p>
+                  </div>
+
+                  {/* Scan Configuration */}
                   <div className={`${cardClass} border rounded-xl p-6`}>
-                    <div className="flex items-center space-x-4 mb-6">
-                      <div className="p-3 bg-green-500/20 rounded-lg">
-                        <Sparkles className="h-6 w-6 text-green-400" />
+                    <h2 className={`text-xl font-semibold ${textClass} mb-4`}>Quick Scan</h2>
+                    <div className="space-y-4">
+                      <div>
+                        <label htmlFor="scanTarget" className="block text-sm font-medium text-slate-400 mb-1">Target (Domain or IP)</label>
+                        <input
+                          type="text"
+                          id="scanTarget"
+                          className={inputClass}
+                          placeholder="e.g., example.com or 192.168.1.1"
+                          value={scanTarget}
+                          onChange={(e) => setScanTarget(e.target.value)}
+                        />
                       </div>
                       <div>
-                        <h2 className={`text-xl font-semibold ${textClass}`}>Security Assessment</h2>
-                        <p className="text-slate-400">AI-powered analysis of your target</p>
+                        <label htmlFor="scanType" className="block text-sm font-medium text-slate-400 mb-1">Scan Type</label>
+                        <select
+                          id="scanType"
+                          className={inputClass}
+                          value={scanType}
+                          onChange={(e) => setScanType(e.target.value)}
+                        >
+                          <option value="port">Port Scan</option>
+                          <option value="vulnerability">Basic Vulnerability Scan</option>
+                          <option value="web">Basic Web App Scan</option>
+                          <option value="network">Basic Network Discovery</option>
+                        </select>
                       </div>
+                      <button
+                        onClick={performScan}
+                        disabled={isScanning}
+                        className={`w-full py-2 px-4 rounded-lg ${buttonPrimaryClass} ${isScanning ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        {isScanning ? (
+                          <span className="flex items-center justify-center">
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                            Scanning...
+                          </span>
+                        ) : (
+                          <span className="flex items-center justify-center space-x-2">
+                            <Zap className="h-5 w-5" />
+                            <span>Start Quick Scan</span>
+                          </span>
+                        )}
+                      </button>
                     </div>
+                  </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                      <div className={`${cardClass} border rounded-lg p-6`}>
-                        <h3 className="font-semibold mb-4">Vulnerability Summary</h3>
-                        <div className="space-y-4">
-                          <div>
-                            <div className="flex justify-between mb-1">
-                              <span className="text-sm font-medium">Critical</span>
-                              <span className="text-sm text-red-400">3 issues</span>
+                  {/* Vulnerability Scanning Tools */}
+                  <div className={`${cardClass} border rounded-xl p-6`}>
+                    <h2 className={`text-xl font-semibold ${textClass} mb-4`}>Vulnerability Scanning Tools</h2>
+                    <p className="text-slate-400 mb-6">Select a specialized tool to configure and launch a targeted scan.</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {scanningTools.map((tool) => (
+                        <div key={tool.id} className={`${cardClass} border rounded-xl p-6 flex flex-col`}>
+                          <div className="flex items-center space-x-4 mb-4">
+                            <div className="p-3 bg-blue-500/20 rounded-lg">
+                              <tool.icon className="h-6 w-6 text-blue-400" />
                             </div>
-                            <div className="w-full bg-slate-700 rounded-full h-2">
-                              <div className="bg-red-500 h-2 rounded-full" style={{ width: '15%' }}></div>
-                            </div>
-                          </div>
-                          <div>
-                            <div className="flex justify-between mb-1">
-                              <span className="text-sm font-medium">High</span>
-                              <span className="text-sm text-yellow-400">7 issues</span>
-                            </div>
-                            <div className="w-full bg-slate-700 rounded-full h-2">
-                              <div className="bg-yellow-500 h-2 rounded-full" style={{ width: '35%' }}></div>
+                            <div>
+                              <h3 className={`text-xl font-semibold ${textClass}`}>{tool.name}</h3>
+                              <p className="text-sm text-slate-400">{tool.category.charAt(0).toUpperCase() + tool.category.slice(1)} Tool</p>
                             </div>
                           </div>
-                          <div>
-                            <div className="flex justify-between mb-1">
-                              <span className="text-sm font-medium">Medium</span>
-                              <span className="text-sm text-blue-400">12 issues</span>
-                            </div>
-                            <div className="w-full bg-slate-700 rounded-full h-2">
-                              <div className="bg-blue-500 h-2 rounded-full" style={{ width: '60%' }}></div>
-                            </div>
-                          </div>
+                          <p className="text-slate-400 text-sm mb-4 flex-grow">{tool.description}</p>
+                          <button
+                            onClick={() => handleOpenToolOptions(tool)}
+                            className={`w-full py-2 ${buttonSecondaryClass}`}
+                          >
+                            Configure & Scan
+                          </button>
                         </div>
-                      </div>
+                      ))}
+                    </div>
+                  </div>
 
-                      <div className={`${cardClass} border rounded-lg p-6`}>
-                        <h3 className="font-semibold mb-4">Recommendations</h3>
-                        <ul className="space-y-3">
-                          <li className="flex items-start space-x-2">
-                            <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                            <span className="text-sm">Update Apache to version 2.4.56</span>
-                          </li>
-                          <li className="flex items-start space-x-2">
-                            <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                            <span className="text-sm">Disable TLS 1.0 and 1.1 support</span>
-                          </li>
-                          <li className="flex items-start space-x-2">
-                            <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                            <span className="text-sm">Implement rate limiting on login endpoint</span>
-                          </li>
-                          <li className="flex items-start space-x-2">
-                            <CheckCircle className="h-4 w-4 text-green-400 mt-0.5 flex-shrink-0" />
-                            <span className="text-sm">Sanitize user input in contact forms</span>
-                          </li>
-                        </ul>
+                  {/* Scan Results */}
+                  {scanResults && (
+                    <div className={`${cardClass} border rounded-xl p-6`}>
+                      <h2 className={`text-xl font-semibold ${textClass} mb-4`}>Latest Scan Results for {scanResults.target}</h2>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-400 mb-4">
+                        <p><strong>Type:</strong> {scanResults.type}</p>
+                        <p><strong>Status:</strong> <span className={`font-medium ${scanResults.status === 'completed' ? 'text-green-400' : 'text-yellow-400'}`}>{scanResults.status}</span></p>
+                        <p><strong>Duration:</strong> {scanResults.duration} seconds</p>
+                        <p><strong>Timestamp:</strong> {new Date(scanResults.timestamp).toLocaleString()}</p>
+                      </div>
+                      <h3 className={`text-lg font-semibold ${textClass} mb-3`}>Findings ({scanResults.findings.length})</h3>
+                      <div className="space-y-3">
+                        {scanResults.findings.map((finding: any, index: number) => (
+                          <div key={index} className="p-3 bg-slate-700/30 rounded-lg border border-slate-700">
+                            <p className="font-medium text-white">{finding.type || finding.port}</p>
+                            <p className="text-sm text-slate-400">{finding.description}</p>
+                            <p className={`text-xs font-semibold mt-1 ${
+                              finding.severity === 'critical' ? 'text-red-400' :
+                              finding.severity === 'high' ? 'text-yellow-400' :
+                              'text-blue-400'
+                            }`}>Severity: {finding.severity || finding.risk}</p>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
 
-                    <div className={`${cardClass} border rounded-lg p-6`}>
-                      <h3 className="font-semibold mb-4">Detailed AI Insights</h3>
-                      <p className="text-sm text-slate-400 leading-relaxed">
-                        Based on the latest scan of {currentProject.target}, our AI engine detected several patterns indicative of potential security vulnerabilities.
-                        Specifically, the system identified outdated server software (Apache 2.4.29) which is known to have CVE-2023-XXXX.
-                        Furthermore, certain input fields appear to be susceptible to cross-site scripting (XSS) due to insufficient sanitization, and a possible SQL injection point was flagged in the user authentication module.
-                        The AI suggests immediate review of these findings and prioritizes patching critical and high-severity issues to mitigate risks of unauthorized access and data exfiltration.
-                        Further analysis reveals that the current SSL/TLS configuration could be strengthened by disabling older, less secure protocols like TLS 1.0 and 1.1.
-                        The AI also recommends implementing robust rate-limiting mechanisms on all public-facing endpoints to prevent brute-force attacks.
-                        Continuous monitoring and adherence to secure coding practices are advised to maintain a strong security posture.
-                        This section could contain a very long, detailed AI-generated report summary, explaining every anomaly, potential attack vector, and mitigation strategy, pulling data from various scan modules and threat intelligence feeds.
-                        It would also highlight trends, suggest predictive measures, and recommend specific patches or configuration changes.
-                        The goal is to provide a comprehensive, actionable overview that combines raw scan data with intelligent analysis, making it easier for security teams to understand complex issues and prioritize their remediation efforts.
-                        This section has enough content that it **should be scrollable independently** if the window is not tall enough to fit it all. This ensures that even if you have a massive AI report, the sidebar itself doesn't scroll with it, and the rest of the dashboard remains in place.
-                        This section has enough content that it **should be scrollable independently** if the window is not tall enough to fit it all. This ensures that even if you have a massive AI report, the sidebar itself doesn't scroll with it, and the rest of the dashboard remains in place.
-                        This section has enough content that it **should be scrollable independently** if the window is not tall enough to fit it all. This ensures that even if you have a massive AI report, the sidebar itself doesn't scroll with it, and the rest of the dashboard remains in place.
-                        This section has enough content that it **should be scrollable independently** if the window is not tall enough to fit it all. This ensures that even if you have a massive AI report, the sidebar itself doesn't scroll with it, and the rest of the dashboard remains in place.
-                        This section has enough content that it **should be scrollable independently** if the window is not tall enough to fit it all. This ensures that even if you have a massive AI report, the sidebar itself doesn't scroll with it, and the rest of the dashboard remains in place.
-                        This section has enough content that it **should be scrollable independently** if the window is not tall enough to fit it all. This ensures that even if you have a massive AI report, the sidebar itself doesn't scroll with it, and the rest of the dashboard remains in place.
-                      </p>
+              {/* Reports Section */}
+              {activeSection === 'reports' && (
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+                  <div>
+                    <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Security Reports</h1>
+                    <p className="text-slate-400">Manage and generate detailed security assessment reports.</p>
+                  </div>
+
+                  <div className="flex justify-end mb-4">
+                    <button onClick={handleCreateNewReport} className={`px-4 py-2 ${buttonPrimaryClass} flex items-center space-x-2`}>
+                      <Plus className="h-5 w-5" />
+                      <span>Create New Report</span>
+                    </button>
+                  </div>
+
+                  <div className={`${cardClass} border rounded-xl p-6`}>
+                    <h2 className={`text-xl font-semibold ${textClass} mb-4`}>Report List (Mock)</h2>
+                    <p className="text-slate-400">Your generated reports will appear here. Click "Create New Report" to start.</p>
+                    {/* Mock report list */}
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/30">
+                        <div>
+                          <p className="font-medium text-white">Report #ABC1234</p>
+                          <p className="text-sm text-slate-400">Target: example.com - 2025-07-28</p>
+                        </div>
+                        <button onClick={() => notify.info('View Report', 'Viewing mock report')} className={`px-3 py-1 text-sm ${buttonSecondaryClass}`}>View</button>
+                      </div>
+                      <div className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/30">
+                        <div>
+                          <p className="font-medium text-white">Report #DEF5678</p>
+                          <p className="text-sm text-slate-400">Target: test.org - 2025-07-20</p>
+                        </div>
+                        <button onClick={() => notify.info('View Report', 'Viewing mock report')} className={`px-3 py-1 text-sm ${buttonSecondaryClass}`}>View</button>
+                      </div>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Scan History Section */}
+              {activeSection === 'history' && (
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+                  <div>
+                    <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Scan History</h1>
+                    <p className="text-slate-400">Review past scan results and their statuses.</p>
+                  </div>
+
+                  {/* Filters and Search for Scan History */}
+                  <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                    <div className="flex-1">
+                      <label htmlFor="scanSearch" className="sr-only">Search Scans</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+                        <input
+                          type="text"
+                          id="scanSearch"
+                          className={`${inputClass} pl-10`}
+                          placeholder="Search scans by target or type..."
+                          value={scanSearchTerm}
+                          onChange={(e) => setScanSearchTerm(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex space-x-2 overflow-x-auto pb-2 sm:pb-0">
+                      {['all', 'completed', 'pending', 'canceled'].map(status => (
+                        <button
+                          key={status}
+                          onClick={() => setScanFilter(status as Scan['status'] | 'all')}
+                          className={`px-4 py-2 rounded-full font-medium text-sm whitespace-nowrap transition-all duration-200
+                            ${scanFilter === status
+                              ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg'
+                              : 'bg-slate-700/50 hover:bg-slate-700 text-slate-300'
+                            }`}
+                        >
+                          {status.charAt(0).toUpperCase() + status.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Scan History List */}
+                  <div className={`${cardClass} border rounded-xl p-6`}>
+                    <h2 className={`text-xl font-semibold ${textClass} mb-4`}>All Scans ({filteredScanHistory.length})</h2>
+                    {filteredScanHistory.length > 0 ? (
+                      <div className="space-y-4">
+                        {filteredScanHistory.map((scan) => (
+                          <div key={scan.id} className="p-4 bg-slate-700/30 rounded-lg border border-slate-700 flex flex-col md:flex-row justify-between items-start md:items-center gap-3 shadow-md hover:shadow-lg transition-shadow duration-200">
+                            <div>
+                              <p className={`font-medium ${textClass} text-lg`}>{scan.target} <span className="text-sm text-slate-400">({scan.type})</span></p>
+                              <p className="text-sm text-slate-400">Started: {new Date(scan.timestamp).toLocaleString()}</p>
+                            </div>
+                            <div className="flex items-center space-x-3">
+                              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                                scan.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                                scan.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
+                                'bg-red-500/20 text-red-400'
+                              }`}>
+                                {scan.status.charAt(0).toUpperCase() + scan.status.slice(1)}
+                              </span>
+                              <button onClick={() => setSelectedScanForDetails(scan)} className={`px-3 py-1 text-sm ${buttonSecondaryClass}`}>
+                                View Details
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-slate-400 text-center py-8">No scans match your criteria.</p>
+                    )}
                   </div>
                 </div>
               )}
@@ -620,24 +1017,92 @@ export default function DashboardPage() {
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
                   <div>
                     <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Security Tools</h1>
-                    <p className="text-slate-400">Select the tools you want to use for your security assessment</p>
+                    <p className="text-slate-400">Explore and utilize a variety of powerful cybersecurity tools.</p>
                   </div>
 
+                  {/* Tool Filters and Search */}
+                  <div className="flex flex-col sm:flex-row gap-4 mb-6">
+                    <div className="flex-1">
+                      <label htmlFor="toolSearch" className="sr-only">Search Tools</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400" />
+                        <input
+                          type="text"
+                          id="toolSearch"
+                          className={`${inputClass} pl-10`}
+                          placeholder="Search tools by name or description..."
+                          value={toolSearchTerm}
+                          onChange={(e) => setToolSearchTerm(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex space-x-2 overflow-x-auto pb-2 sm:pb-0">
+                      {['all', 'network', 'web', 'password', 'general'].map(category => (
+                        <button
+                          key={category}
+                          onClick={() => setToolFilter(category as Tool['category'] | 'all')}
+                          className={`px-4 py-2 rounded-full font-medium text-sm whitespace-nowrap transition-all duration-200
+                            ${toolFilter === category
+                              ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg'
+                              : 'bg-slate-700/50 hover:bg-slate-700 text-slate-300'
+                            }`}
+                        >
+                          {category.charAt(0).toUpperCase() + category.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Tool List */}
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {tools.map((tool, index) => (
-                      <div key={index} className={`${cardClass} border rounded-xl p-6 hover:border-green-500/30 transition-colors`}>
+                    {filteredGenericTools.map((tool) => (
+                      <div key={tool.id} className={`${cardClass} border rounded-xl p-6 flex flex-col`}>
                         <div className="flex items-center space-x-4 mb-4">
-                          <div className="p-2 bg-green-500/20 rounded-lg">
-                            <tool.icon className="h-5 w-5 text-green-400" />
+                          <div className="p-3 bg-blue-500/20 rounded-lg">
+                            <tool.icon className="h-6 w-6 text-blue-400" />
                           </div>
-                          <h3 className="font-semibold">{tool.name}</h3>
+                          <div>
+                            <h3 className={`text-xl font-semibold ${textClass}`}>{tool.name}</h3>
+                            <p className="text-sm text-slate-400">{tool.category.charAt(0).toUpperCase() + tool.category.slice(1)} Tool</p>
+                          </div>
                         </div>
-                        <p className="text-sm text-slate-400 mb-4">{tool.description}</p>
-                        <button className="w-full bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg font-medium transition-colors">
+                        <p className="text-slate-400 text-sm mb-4 flex-grow">{tool.description}</p>
+                        <button onClick={() => notify.info('Tool Action', `Using ${tool.name}`)} className={`w-full py-2 ${buttonSecondaryClass}`}>
                           Use Tool
                         </button>
                       </div>
                     ))}
+                  </div>
+
+                  {/* Animated Logos Section */}
+                  <div className={`${cardClass} border rounded-xl p-6 relative overflow-hidden`}>
+                    <h2 className={`text-xl font-semibold ${textClass} mb-4 text-center`}>Powered by Industry-Leading Tools</h2>
+                    <div className="relative w-full overflow-hidden py-4">
+                      <div className="flex items-center justify-around animate-marquee whitespace-nowrap">
+                        {/* Repeat logos to create continuous scroll effect */}
+                        {['/nmap-logo.png', '/nikto-logo.png', '/gobuster-logo.png', '/sqlmap-logo.png', '/metasploit-logo.png', '/burpsuite-logo.png'].map((src, index) => (
+                          <Image key={`logo-${index}-1`} src={src} alt={`Tool Logo ${index}`} width={80} height={80} className="mx-8 grayscale opacity-70 hover:opacity-100 transition-opacity duration-300" />
+                        ))}
+                        {/* Duplicated set for seamless loop */}
+                        {['/nmap-logo.png', '/nikto-logo.png', '/gobuster-logo.png', '/sqlmap-logo.png', '/metasploit-logo.png', '/burpsuite-logo.png'].map((src, index) => (
+                          <Image key={`logo-${index}-2`} src={src} alt={`Tool Logo ${index}`} width={80} height={80} className="mx-8 grayscale opacity-70 hover:opacity-100 transition-opacity duration-300" />
+                        ))}
+                      </div>
+                    </div>
+                    <style jsx>{`
+                      @keyframes marquee {
+                        0% { transform: translateX(0%); }
+                        100% { transform: translateX(-50%); } /* Moves half the width of duplicated content */
+                      }
+                      .animate-marquee {
+                        animation: marquee 30s linear infinite; /* Adjust duration for speed */
+                      }
+                    `}</style>
+                    <div className="text-center mt-4">
+                      <button onClick={() => notify.info('Learn More', 'Explore our comprehensive toolset.')} className={`px-6 py-2 ${buttonPrimaryClass}`}>
+                        Explore All Tools
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -646,213 +1111,151 @@ export default function DashboardPage() {
               {activeSection === 'addons' && (
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
                   <div>
-                    <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Addons</h1>
-                    <p className="text-slate-400">Enhance your scanning capabilities with additional tools and resources</p>
+                    <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Addons Marketplace</h1>
+                    <p className="text-slate-400">Extend CyberScope Pro's capabilities with powerful addons.</p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {addons.map((addon, index) => (
-                      <div key={index} className={`${cardClass} border rounded-xl p-6`}>
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <h3 className="font-semibold">{addon.name}</h3>
-                            <p className="text-sm text-slate-400 mt-1">{addon.description}</p>
+                  {/* Go to Store Card */}
+                  <div className={`${cardClass} border rounded-xl p-6 text-center`}>
+                    <Package className="h-12 w-12 text-green-400 mx-auto mb-4" />
+                    <h2 className={`text-xl font-semibold ${textClass} mb-2`}>Discover More Addons</h2>
+                    <p className="text-slate-400 mb-4">Visit our full marketplace for even more powerful integrations and tools.</p>
+                    <button onClick={() => notify.info('Go to Store', 'Redirecting to CyberScope Addon Store (mock).')} className={`px-6 py-2 ${buttonPrimaryClass}`}>
+                      Go to Store
+                    </button>
+                  </div>
+
+                  {/* Addons List */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {addons.map((addon) => (
+                      <div key={addon.id} className={`${cardClass} border rounded-xl p-6 flex flex-col`}>
+                        <div className="flex items-center space-x-4 mb-4">
+                          <div className="p-3 bg-purple-500/20 rounded-lg">
+                            <Package className="h-6 w-6 text-purple-400" />
                           </div>
-                          <span className={`px-2 py-1 rounded text-xs ${
-                            addon.installed ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'
-                          }`}>
-                            {addon.installed ? 'Installed' : 'Available'}
-                          </span>
+                          <div>
+                            <h3 className={`text-xl font-semibold ${textClass}`}>{addon.name}</h3>
+                            <p className="text-sm text-slate-400">{addon.description}</p>
+                          </div>
                         </div>
-                        <div className="mt-4 flex space-x-2">
-                          <button className={`px-3 py-1 rounded text-sm ${
-                            addon.installed
-                              ? 'bg-slate-700 hover:bg-slate-600'
-                              : 'bg-green-500 hover:bg-green-600'
-                          } transition-colors`}>
-                            {addon.installed ? 'Manage' : 'Install'}
-                          </button>
-                          {!addon.installed && (
-                            <button className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm transition-colors">
-                              Details
+                        <div className="text-sm text-slate-400 mb-4 flex-grow">
+                          <p><strong>Size:</strong> {addon.size}</p>
+                          {addon.version && <p><strong>Version:</strong> {addon.version}</p>}
+                          {addon.lastUpdated && <p><strong>Last Updated:</strong> {addon.lastUpdated}</p>}
+                          <p><strong>Status:</strong> <span className={`font-semibold ${addon.status === 'installed' ? 'text-green-400' : addon.status === 'installing' ? 'text-yellow-400' : 'text-blue-400'}`}>{addon.status?.charAt(0).toUpperCase() + addon.status?.slice(1)}</span></p>
+                        </div>
+                        <div className="flex space-x-2">
+                          {addon.installed ? (
+                            <button
+                              onClick={() => handleAddonAction(addon, 'manage')}
+                              className={`flex-1 py-2 ${buttonSecondaryClass}`}
+                            >
+                              Manage
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleAddonAction(addon, 'install')}
+                              className={`flex-1 py-2 ${buttonPrimaryClass}`}
+                            >
+                              Install
                             </button>
                           )}
                         </div>
                       </div>
                     ))}
-
-                    <div className={`${cardClass} border border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center`}>
-                      <Package className="h-8 w-8 text-slate-400 mb-3" />
-                      <h3 className="font-medium mb-1">Import Addon</h3>
-                      <p className="text-sm text-slate-400 mb-4">Upload custom tools or wordlists</p>
-                      <button className="flex items-center space-x-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors">
-                        <Import className="h-4 w-4" />
-                        <span>Import</span>
-                      </button>
-                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Scanner Section (placeholder) */}
-              {activeSection === 'scanner' && (
+              {/* Settings Section */}
+              {activeSection === 'settings' && (
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-                  <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Scanner</h1>
-                  <p className="text-slate-400">Configure and run your security scans.</p>
-                  {/* Add scanner input fields, type selection, and scan button here */}
+                  <div>
+                    <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Settings</h1>
+                    <p className="text-slate-400">Manage your profile, subscription, and application preferences.</p>
+                  </div>
+
+                  {/* Subscription Card */}
                   <div className={`${cardClass} border rounded-xl p-6`}>
-                    <h2 className={`text-xl font-semibold ${textClass} mb-4`}>New Scan</h2>
+                    <h2 className={`text-xl font-semibold ${textClass} mb-4 flex items-center space-x-2`}>
+                      <DollarSign className="h-6 w-6 text-green-400" />
+                      <span>Subscription Plan</span>
+                    </h2>
                     <div className="space-y-4">
                       <div>
-                        <label htmlFor="scanTarget" className="block text-sm font-medium text-slate-400 mb-1">Target</label>
+                        <p className="text-slate-400 text-sm">Current Plan:</p>
+                        <p className={`text-2xl font-bold ${textClass}`}>{user?.plan?.toUpperCase() || 'FREE'}</p>
+                        {user?.plan === 'free_trial' && (
+                          <p className="text-sm text-yellow-400 mt-1">Your free trial ends in {daysLeft} days.</p>
+                        )}
+                      </div>
+
+                      <h3 className={`text-lg font-semibold ${textClass} mt-6 mb-3`}>Upgrade Your Plan</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className={`${cardClass} border rounded-lg p-4 flex flex-col`}>
+                          <h4 className="font-semibold text-white mb-2">Pro Plan</h4>
+                          <p className="text-slate-400 text-sm mb-4 flex-grow">Advanced scanning features, increased scan quota, priority support.</p>
+                          <p className={`text-2xl font-bold ${textClass} mb-3`}>$49<span className="text-sm text-slate-400">/month</span></p>
+                          <button
+                            onClick={() => handleUpgradePlan('pro')}
+                            disabled={user?.plan === 'pro' || user?.plan === 'pro_plus'}
+                            className={`w-full py-2 ${buttonPrimaryClass} ${user?.plan === 'pro' || user?.plan === 'pro_plus' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            {user?.plan === 'pro' ? 'Current Plan' : 'Upgrade to Pro'}
+                          </button>
+                        </div>
+                        <div className={`${cardClass} border rounded-lg p-4 flex flex-col`}>
+                          <h4 className="font-semibold text-white mb-2">Pro+ Plan</h4>
+                          <p className="text-slate-400 text-sm mb-4 flex-grow">All Pro features, AI-powered insights, unlimited scans, dedicated account manager.</p>
+                          <p className={`text-2xl font-bold ${textClass} mb-3`}>$99<span className="text-sm text-slate-400">/month</span></p>
+                          <button
+                            onClick={() => handleUpgradePlan('pro_plus')}
+                            disabled={user?.plan === 'pro_plus'}
+                            className={`w-full py-2 ${buttonPrimaryClass} ${user?.plan === 'pro_plus' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                          >
+                            {user?.plan === 'pro_plus' ? 'Current Plan' : 'Upgrade to Pro+'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Profile Settings Card */}
+                  <div className={`${cardClass} border rounded-xl p-6`}>
+                    <h2 className={`text-xl font-semibold ${textClass} mb-4 flex items-center space-x-2`}>
+                      <UserCheck className="h-6 w-6 text-blue-400" />
+                      <span>Profile Information</span>
+                    </h2>
+                    <div className="space-y-4">
+                      <div>
+                        <label htmlFor="profileName" className="block text-sm font-medium text-slate-400 mb-1">Name</label>
                         <input
                           type="text"
-                          id="scanTarget"
-                          value={scanTarget}
-                          onChange={(e) => setScanTarget(e.target.value)}
-                          placeholder="e.g., example.com or 192.168.1.1"
+                          id="profileName"
                           className={inputClass}
+                          value={user?.name || ''}
+                          onChange={(e) => updateProfile({ name: e.target.value })}
+                          disabled={!user}
                         />
                       </div>
                       <div>
-                        <label htmlFor="scanType" className="block text-sm font-medium text-slate-400 mb-1">Scan Type</label>
-                        <select
-                          id="scanType"
-                          value={scanType}
-                          onChange={(e) => setScanType(e.target.value)}
+                        <label htmlFor="profileEmail" className="block text-sm font-medium text-slate-400 mb-1">Email</label>
+                        <input
+                          type="email"
+                          id="profileEmail"
                           className={inputClass}
-                        >
-                          <option value="port">Port Scan</option>
-                          <option value="vulnerability">Vulnerability Scan</option>
-                          <option value="ssl">SSL Scan</option>
-                        </select>
+                          value={user?.email || ''}
+                          disabled // Email usually cannot be changed directly from profile settings
+                        />
+                        <p className="text-xs text-slate-500 mt-1">Email cannot be changed directly from here.</p>
                       </div>
                       <button
-                        onClick={performScan}
-                        disabled={isScanning}
-                        className="w-full bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => notify.info('Save Profile', 'Profile updates are saved automatically.')}
+                        className={`px-4 py-2 ${buttonPrimaryClass}`}
+                        disabled={!user}
                       >
-                        {isScanning ? 'Scanning...' : 'Start Scan'}
+                        Save Profile
                       </button>
-                    </div>
-                  </div>
-                  {scanResults && (
-                    <div className={`${cardClass} border rounded-xl p-6 mt-6`}>
-                      <h2 className={`text-xl font-semibold ${textClass} mb-4`}>Scan Results</h2>
-                      <p className="text-sm text-slate-400 mb-2">Target: {scanResults.target}</p>
-                      <p className="text-sm text-slate-400 mb-2">Type: {scanResults.type}</p>
-                      <p className="text-sm text-slate-400 mb-4">Duration: {scanResults.duration} seconds</p>
-                      <h3 className="font-semibold mb-2">Findings ({scanResults.findings.length})</h3>
-                      <ul className="space-y-2">
-                        {scanResults.findings.map((finding: any, idx: number) => (
-                          <li key={idx} className="bg-slate-700/30 p-3 rounded-lg flex justify-between items-center">
-                            <span className="text-sm">{finding.description || `Port: ${finding.port}, Service: ${finding.service}`}</span>
-                            <span className={`px-2 py-1 rounded-full text-xs font-semibold
-                              ${finding.severity === 'critical' ? 'bg-red-500/20 text-red-400' : ''}
-                              ${finding.severity === 'high' ? 'bg-orange-500/20 text-orange-400' : ''}
-                              ${finding.severity === 'medium' ? 'bg-yellow-500/20 text-yellow-400' : ''}
-                              ${finding.severity === 'low' ? 'bg-blue-500/20 text-blue-400' : ''}
-                              ${finding.state === 'open' ? 'bg-green-500/20 text-green-400' : ''}
-                              ${finding.state === 'filtered' ? 'bg-yellow-500/20 text-yellow-400' : ''}
-                            `}>
-                              {finding.severity || finding.state}
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Reports Section (placeholder) */}
-              {activeSection === 'reports' && (
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-                  <div>
-                    <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Security Reports</h1>
-                    <p className="text-slate-400">Create, view, and manage your detailed security reports.</p>
-                  </div>
-
-                  <div className={`${cardClass} border rounded-xl p-6 flex items-center justify-between`}>
-                      <h2 className={`text-xl font-semibold ${textClass}`}>Manage Reports</h2>
-                      <button
-                          onClick={handleCreateNewReport} // Button to open the modal
-                          className="bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg font-medium text-white text-sm transition-colors flex items-center space-x-2"
-                      >
-                          <Plus className="h-4 w-4" />
-                          <span>Create New Report</span>
-                      </button>
-                  </div>
-
-                  <div className={`${cardClass} border rounded-xl p-6`}>
-                      <h2 className={`text-xl font-semibold ${textClass} mb-4`}>Existing Reports</h2>
-                      {/* Placeholder for a list of existing reports */}
-                      <p className="text-slate-400">Your saved reports will appear here. Click "Create New Report" to start.</p>
-                      <ul className="mt-4 space-y-2">
-                        {/* Example existing report items */}
-                        <li className="flex justify-between items-center p-3 bg-slate-700/30 rounded-lg">
-                          <span>Report #SEC-2023-001 (example.com)</span>
-                          <div className="flex space-x-2">
-                            <button className="p-1.5 bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30">
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            <button className="p-1.5 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30">
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </li>
-                      </ul>
-                  </div>
-                </div>
-              )}
-
-              {/* Scan History Section (placeholder) */}
-              {activeSection === 'history' && (
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-                  <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Scan History</h1>
-                  <p className="text-slate-400">Review your past security scan results.</p>
-                  <div className={`${cardClass} border rounded-xl p-6`}>
-                    {scanHistory.length === 0 ? (
-                      <p>No scan history yet. Start a scan to see it here!</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {scanHistory.map((scan, index) => (
-                          <div key={index} className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-700/30">
-                            {/* FIX: Wrapped the first two elements in a parent div */}
-                            <div className="flex items-center space-x-3">
-                              <div className={`w-2 h-2 rounded-full ${scan.status === 'completed' ? 'bg-green-400' : 'bg-yellow-400'}`} />
-                              <div>
-                                <p className={`font-medium ${textClass}`}>{scan.target}</p>
-                                <p className="text-sm text-slate-400">{new Date(scan.timestamp).toLocaleString()}</p>
-                              </div>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <span className={`px-2 py-1 rounded text-xs ${
-                                scan.status === 'completed' ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-                              }`}>
-                                {scan.status}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Settings Section (placeholder) */}
-              {activeSection === 'settings' && (
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-                  <h1 className={`text-3xl font-bold ${textClass} mb-2`}>Settings</h1>
-                  <p className="text-slate-400">Manage your application settings.</p>
-                  <div className={`${cardClass} border rounded-xl p-6`}>
-                    <p>User preferences, integrations, notifications, etc. will go here.</p>
-                    <div className="mt-4">
-                      <h3 className="font-medium text-slate-300 mb-2">Account Info</h3>
-                      <p className="text-sm text-slate-400">Name: {user?.name || 'Demo User'}</p>
-                      <p className="text-sm text-slate-400">Email: {user?.email || 'demo@cyberscope.com'}</p>
-                      <button onClick={logout} className="mt-4 px-4 py-2 bg-red-500 hover:bg-red-600 rounded-lg text-white text-sm">Logout</button>
                     </div>
                   </div>
                 </div>
@@ -862,29 +1265,23 @@ export default function DashboardPage() {
         </main>
       </div>
 
-      {/* Mobile Sidebar Overlay (active when sidebarOpen is true AND it's a small screen) */}
-      {sidebarOpen && typeof window !== 'undefined' && window.innerWidth < 1024 && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      {/* AI Insight Popup Card */}
+      {/* AI Insight Popup Modal */}
       {aiInsightPopupOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className={`${cardClass} border rounded-xl shadow-lg w-full max-w-3xl h-3/4 flex flex-col`}>
-            <div className="flex justify-between items-center p-4 border-b border-slate-700">
-              <h2 className={`text-xl font-bold ${textClass}`}>Detailed AI Insights</h2>
-              <button onClick={() => setAiInsightPopupOpen(false)} className="p-2 rounded-lg hover:bg-slate-700/50">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-4 flex-grow overflow-y-auto">
-              <pre className="whitespace-pre-wrap font-mono text-sm text-slate-300">{aiInsightContent}</pre>
-            </div>
-            <div className="p-4 border-t border-slate-700 flex justify-end">
-              <button onClick={() => setAiInsightPopupOpen(false)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium">
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]">
+          <div className={`${cardClass} border rounded-xl p-6 w-11/12 max-w-2xl max-h-[90vh] overflow-y-auto relative ${darkMode ? 'scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800' : 'scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200'}`}>
+            <button
+              onClick={() => setAiInsightPopupOpen(false)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-700/50"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 className={`text-2xl font-bold ${textClass} mb-4`}>AI Insights</h2>
+            <pre className="whitespace-pre-wrap break-words p-4 bg-slate-700/30 rounded-lg text-slate-200 text-sm">
+              {aiInsightContent}
+            </pre>
+            <div className="mt-6 text-right">
+              <button onClick={() => setAiInsightPopupOpen(false)} className={`px-4 py-2 ${buttonSecondaryClass}`}>
                 Close
               </button>
             </div>
@@ -892,97 +1289,332 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Report Creation Modal */}
+      {/* Report Editor Modal */}
       {reportModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className={`${cardClass} border rounded-xl shadow-lg w-full max-w-4xl h-[90vh] flex flex-col`}>
-            <div className="flex justify-between items-center p-4 border-b border-slate-700">
-              <h2 className={`text-xl font-bold ${textClass}`}>Create/Edit Security Report</h2>
-              <button onClick={() => setReportModalOpen(false)} className="p-2 rounded-lg hover:bg-slate-700/50">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="p-4 flex-grow overflow-y-auto space-y-6">
-              {/* Report Editor Metadata Fields (moved inside modal) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="reportId" className="block text-sm font-medium text-slate-400 mb-1">Report ID</label>
-                  <input
-                    type="text"
-                    id="reportId"
-                    value={reportMetadata.reportId}
-                    onChange={(e) => setReportMetadata(prev => ({ ...prev, reportId: e.target.value }))}
-                    placeholder="e.g., CYB-REP-001"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reportDate" className="block text-sm font-medium text-slate-400 mb-1">Date</label>
-                  <input
-                    type="date"
-                    id="reportDate"
-                    value={reportMetadata.date}
-                    onChange={(e) => setReportMetadata(prev => ({ ...prev, date: e.target.value }))}
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reportedBy" className="block text-sm font-medium text-slate-400 mb-1">Reported By</label>
-                  <input
-                    type="text"
-                    id="reportedBy"
-                    value={reportMetadata.reportedBy}
-                    onChange={(e) => setReportMetadata(prev => ({ ...prev, reportedBy: e.target.value }))}
-                    placeholder="Your Name"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="reportTarget" className="block text-sm font-medium text-slate-400 mb-1">Target</label>
-                  <input
-                    type="text"
-                    id="reportTarget"
-                    value={reportMetadata.target}
-                    onChange={(e) => setReportMetadata(prev => ({ ...prev, target: e.target.value }))}
-                    placeholder="e.g., example.com"
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-
-              {/* Main Report Content Textarea (moved inside modal) */}
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]">
+          <div className={`${cardClass} border rounded-xl p-6 w-11/12 max-w-4xl max-h-[90vh] overflow-y-auto relative ${darkMode ? 'scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800' : 'scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200'}`}>
+            <button
+              onClick={() => setReportModalOpen(false)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-700/50"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 className={`text-2xl font-bold ${textClass} mb-4`}>Report Editor</h2>
+            <div className="space-y-4 mb-6">
               <div>
-                <h2 className={`text-xl font-semibold ${textClass} mb-4`}>Report Content</h2>
+                <label htmlFor="reportId" className="block text-sm font-medium text-slate-400 mb-1">Report ID</label>
+                <input type="text" id="reportId" className={inputClass} value={reportMetadata.reportId} readOnly />
+              </div>
+              <div>
+                <label htmlFor="reportTarget" className="block text-sm font-medium text-slate-400 mb-1">Target</label>
+                <input type="text" id="reportTarget" className={inputClass} value={reportMetadata.target} readOnly />
+              </div>
+              <div>
+                <label htmlFor="reportContent" className="block text-sm font-medium text-slate-400 mb-1">Content</label>
                 <textarea
+                  id="reportContent"
+                  className={`${inputClass} h-64`}
+                  placeholder="Start writing your security report here..."
                   value={reportContent}
                   onChange={(e) => setReportContent(e.target.value)}
-                  placeholder="Start typing your security report details here, including vulnerability descriptions, impact, and recommendations..."
-                  className={`w-full h-96 ${inputClass} resize-y font-mono text-sm`}
-                />
+                ></textarea>
               </div>
             </div>
-            <div className="p-4 border-t border-slate-700 flex flex-col sm:flex-row gap-2 justify-end">
-              <button
-                onClick={() => setReportModalOpen(false)}
-                className="flex-1 sm:flex-none bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-medium"
-              >
+            <div className="flex justify-end space-x-3">
+              <button onClick={handleDownloadPdf} className={`px-4 py-2 ${buttonSecondaryClass} flex items-center space-x-2`}>
+                <Download className="h-5 w-5" />
+                <span>Download PDF</span>
+              </button>
+              <button onClick={handleSaveReport} className={`px-4 py-2 ${buttonPrimaryClass} flex items-center space-x-2`}>
+                <Save className="h-5 w-5" />
+                <span>Save Report</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Addon Details Modal */}
+      {addonModalOpen && selectedAddon && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]">
+          <div className={`${cardClass} border rounded-xl p-6 w-11/12 max-w-md relative ${darkMode ? 'scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800' : 'scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200'}`}>
+            <button
+              onClick={() => setAddonModalOpen(false)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-700/50"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 className={`text-2xl font-bold ${textClass} mb-4`}>{selectedAddon.name}</h2>
+            <p className="text-slate-400 mb-4">{selectedAddon.description}</p>
+            <div className="space-y-2 text-sm text-slate-400 mb-6">
+              <p><strong>Size:</strong> {selectedAddon.size}</p>
+              {selectedAddon.version && <p><strong>Version:</strong> {selectedAddon.version}</p>}
+              {selectedAddon.lastUpdated && <p><strong>Last Updated:</strong> {selectedAddon.lastUpdated}</p>}
+              <p><strong>Status:</strong> <span className={`font-semibold ${selectedAddon.status === 'installed' ? 'text-green-400' : selectedAddon.status === 'installing' ? 'text-yellow-400' : 'text-blue-400'}`}>{selectedAddon.status?.charAt(0).toUpperCase() + selectedAddon.status?.slice(1)}</span></p>
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button onClick={() => setAddonModalOpen(false)} className={`px-4 py-2 ${buttonSecondaryClass}`}>
+                Close
+              </button>
+              {addonActionType === 'install' && (
+                <button onClick={() => handleInstallAddon(selectedAddon.id)} className={`px-4 py-2 ${buttonPrimaryClass}`}>
+                  Install Now
+                </button>
+              )}
+              {addonActionType === 'manage' && (
+                <button onClick={() => notify.info('Manage Addon', `Managing ${selectedAddon.name}`)} className={`px-4 py-2 ${buttonPrimaryClass}`}>
+                  Manage Addon
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scan Details Modal */}
+      {selectedScanForDetails && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]">
+          <div className={`${cardClass} border rounded-xl p-6 w-11/12 max-w-3xl max-h-[90vh] overflow-y-auto relative ${darkMode ? 'scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800' : 'scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200'}`}>
+            <button
+              onClick={() => setSelectedScanForDetails(null)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-700/50"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 className={`text-2xl font-bold ${textClass} mb-4`}>Scan Details: {selectedScanForDetails.target}</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-slate-400 mb-6">
+              <p><strong>Scan ID:</strong> {selectedScanForDetails.id}</p>
+              <p><strong>Target:</strong> {selectedScanForDetails.target}</p>
+              <p><strong>Type:</strong> {selectedScanForDetails.type}</p>
+              <p><strong>Status:</strong> <span className={`font-medium ${
+                selectedScanForDetails.status === 'completed' ? 'text-green-400' :
+                selectedScanForDetails.status === 'pending' ? 'text-yellow-400' :
+                'text-red-400'
+              }`}>{selectedScanForDetails.status.charAt(0).toUpperCase() + selectedScanForDetails.status.slice(1)}</span></p>
+              <p><strong>Started:</strong> {new Date(selectedScanForDetails.timestamp).toLocaleString()}</p>
+              <p><strong>Duration:</strong> {selectedScanForDetails.duration} seconds</p>
+              <p><strong>Tools Used:</strong> {selectedScanForDetails.toolsUsed?.join(', ') || 'N/A'}</p>
+            </div>
+
+            {selectedScanForDetails.findings.length > 0 && (
+              <>
+                <h3 className={`text-lg font-semibold ${textClass} mb-3`}>Findings ({selectedScanForDetails.findings.length})</h3>
+                <div className="space-y-3 mb-6">
+                  {selectedScanForDetails.findings.map((finding: any, index: number) => (
+                    <div key={index} className="p-3 bg-slate-700/30 rounded-lg border border-slate-700">
+                      <p className="font-medium text-white">{finding.type || finding.port}</p>
+                      <p className="text-sm text-slate-400">{finding.description}</p>
+                      <p className={`text-xs font-semibold mt-1 ${
+                        finding.severity === 'critical' ? 'text-red-400' :
+                        finding.severity === 'high' ? 'text-yellow-400' :
+                        'text-blue-400'
+                      }`}>Severity: {finding.severity || finding.risk}</p>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {selectedScanForDetails.errors && selectedScanForDetails.errors.length > 0 && (
+              <>
+                <h3 className={`text-lg font-semibold ${textClass} mb-3 text-red-400`}>Errors</h3>
+                <ul className="list-disc list-inside text-red-300 text-sm mb-6">
+                  {selectedScanForDetails.errors.map((error, index) => (
+                    <li key={index}>{error}</li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {selectedScanForDetails.logs && (
+              <>
+                <h3 className={`text-lg font-semibold ${textClass} mb-3`}>Logs</h3>
+                <pre className="whitespace-pre-wrap break-words p-4 bg-slate-700/30 rounded-lg text-slate-200 text-sm">
+                  {selectedScanForDetails.logs}
+                </pre>
+              </>
+            )}
+
+            <div className="mt-6 text-right">
+              <button onClick={() => setSelectedScanForDetails(null)} className={`px-4 py-2 ${buttonSecondaryClass}`}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tool Options Modal (for Nmap, Nikto, Gobuster, SQLMap) */}
+      {toolOptionsModalOpen && selectedToolForOptions && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-[100]">
+          <div className={`${cardClass} border rounded-xl p-6 w-11/12 max-w-xl relative ${darkMode ? 'scrollbar-thin scrollbar-thumb-slate-600 scrollbar-track-slate-800' : 'scrollbar-thin scrollbar-thumb-gray-400 scrollbar-track-gray-200'}`}>
+            <button
+              onClick={() => setToolOptionsModalOpen(false)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-700/50"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <h2 className={`text-2xl font-bold ${textClass} mb-4`}>{selectedToolForOptions.name} Options</h2>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-slate-400 mb-1">Target</label>
+              <input type="text" className={inputClass} value={scanTarget} readOnly disabled />
+              <p className="text-xs text-slate-500 mt-1">Target is determined by your current project or quick scan input.</p>
+            </div>
+
+            <h3 className={`text-lg font-semibold ${textClass} mb-3`}>Tool Specific Options</h3>
+
+            {selectedToolForOptions.id === 'nmap' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="nmapOsDetection" className="text-slate-400">OS Detection (-O)</label>
+                  <input
+                    type="checkbox"
+                    id="nmapOsDetection"
+                    checked={nmapOptions.osDetection}
+                    onChange={(e) => setNmapOptions({ ...nmapOptions, osDetection: e.target.checked })}
+                    className="h-5 w-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="nmapNoPing" className="text-slate-400">No Ping (-Pn)</label>
+                  <input
+                    type="checkbox"
+                    id="nmapNoPing"
+                    checked={nmapOptions.noPing}
+                    onChange={(e) => setNmapOptions({ ...nmapOptions, noPing: e.target.checked })}
+                    className="h-5 w-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="nmapAggressive" className="text-slate-400">Aggressive Scan (-A)</label>
+                  <input
+                    type="checkbox"
+                    id="nmapAggressive"
+                    checked={nmapOptions.aggressive}
+                    onChange={(e) => setNmapOptions({ ...nmapOptions, aggressive: e.target.checked })}
+                    className="h-5 w-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {selectedToolForOptions.id === 'nikto' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label htmlFor="niktoFullScan" className="text-slate-400">Full Scan (-C all)</label>
+                  <input
+                    type="checkbox"
+                    id="niktoFullScan"
+                    checked={niktoOptions.fullScan}
+                    onChange={(e) => setNiktoOptions({ ...niktoOptions, fullScan: e.target.checked })}
+                    className="h-5 w-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="niktoSslSupport" className="text-slate-400">SSL Support (-ssl)</label>
+                  <input
+                    type="checkbox"
+                    id="niktoSslSupport"
+                    checked={niktoOptions.sslSupport}
+                    onChange={(e) => setNiktoOptions({ ...niktoOptions, sslSupport: e.target.checked })}
+                    className="h-5 w-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {selectedToolForOptions.id === 'gobuster' && (
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="gobusterWordlist" className="block text-sm font-medium text-slate-400 mb-1">Wordlist</label>
+                  <select
+                    id="gobusterWordlist"
+                    className={inputClass}
+                    value={gobusterOptions.wordlist}
+                    onChange={(e) => setGobusterOptions({ ...gobusterOptions, wordlist: e.target.value })}
+                  >
+                    <option value="common">Common</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                    <option value="custom">Custom (requires addon)</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="gobusterExtensions" className="block text-sm font-medium text-slate-400 mb-1">Extensions (comma-separated)</label>
+                  <input
+                    type="text"
+                    id="gobusterExtensions"
+                    className={inputClass}
+                    placeholder="e.g., php,html,txt"
+                    value={gobusterOptions.extensions}
+                    onChange={(e) => setGobusterOptions({ ...gobusterOptions, extensions: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="gobusterThreads" className="block text-sm font-medium text-slate-400 mb-1">Threads</label>
+                  <input
+                    type="number"
+                    id="gobusterThreads"
+                    className={inputClass}
+                    value={gobusterOptions.threads}
+                    onChange={(e) => setGobusterOptions({ ...gobusterOptions, threads: parseInt(e.target.value) || 1 })}
+                    min="1"
+                    max="50"
+                  />
+                </div>
+              </div>
+            )}
+
+            {selectedToolForOptions.id === 'sqlmap' && (
+              <div className="space-y-3">
+                <div>
+                  <label htmlFor="sqlmapLevel" className="block text-sm font-medium text-slate-400 mb-1">Level (1-5)</label>
+                  <input
+                    type="number"
+                    id="sqlmapLevel"
+                    className={inputClass}
+                    value={sqlmapOptions.level}
+                    onChange={(e) => setSqlmapOptions({ ...sqlmapOptions, level: parseInt(e.target.value) || 1 })}
+                    min="1"
+                    max="5"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="sqlmapRisk" className="block text-sm font-medium text-slate-400 mb-1">Risk (1-3)</label>
+                  <input
+                    type="number"
+                    id="sqlmapRisk"
+                    className={inputClass}
+                    value={sqlmapOptions.risk}
+                    onChange={(e) => setSqlmapOptions({ ...sqlmapOptions, risk: parseInt(e.target.value) || 1 })}
+                    min="1"
+                    max="3"
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <label htmlFor="sqlmapTamper" className="text-slate-400">Use Tamper Scripts</label>
+                  <input
+                    type="checkbox"
+                    id="sqlmapTamper"
+                    checked={sqlmapOptions.tamper}
+                    onChange={(e) => setSqlmapOptions({ ...sqlmapOptions, tamper: e.target.checked })}
+                    className="h-5 w-5 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end space-x-3">
+              <button onClick={() => setToolOptionsModalOpen(false)} className={`px-4 py-2 ${buttonSecondaryClass}`}>
                 Cancel
               </button>
-              <button
-                onClick={handleSaveReport}
-                disabled={!reportContent}
-                className="flex-1 sm:flex-none bg-green-500 hover:bg-green-600 px-4 py-2 rounded-lg font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Save className="h-4 w-4 inline-block mr-2" />
-                Save Report
-              </button>
-              <button
-                onClick={handleDownloadPdf}
-                disabled={!reportContent}
-                className="flex-1 sm:flex-none bg-purple-500 hover:bg-purple-600 px-4 py-2 rounded-lg font-medium text-white disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Download className="h-4 w-4 inline-block mr-2" />
-                Download PDF
+              <button onClick={handleScanWithToolOptions} className={`px-4 py-2 ${buttonPrimaryClass}`}>
+                Start Scan
               </button>
             </div>
           </div>
