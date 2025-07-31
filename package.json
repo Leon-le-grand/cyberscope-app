@@ -11,6 +11,9 @@
   "dependencies": {
     "@heroui/react": "^2.7.11",
     "@next/env": "^15.3.3",
+    "@nivo/bar": "^0.99.0",
+    "@nivo/core": "^0.99.0",
+    "@nivo/line": "^0.99.0",
     "axios": "^1.9.0",
     "caniuse-lite": "^1.0.30001726",
     "cheerio": "^1.0.0",
